@@ -1,441 +1,507 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import api from "../../api";
 import {
-  ClipboardList,
-  CheckCircle,
-  XCircle,
-  Clock,
-  Users,
-  Hash,
-  Calendar,
-  StickyNote,
-  ChevronRight,
+  Plus, Pencil, Trash2, Clock, Hash, CalendarDays,
+  X, Check, AlertTriangle, ChevronDown,
 } from "lucide-react";
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-const getInitials = (name = "") =>
-  name
-    .split(" ")
-    .slice(0, 2)
-    .map((w) => w[0])
-    .join("")
-    .toUpperCase();
+// ── Constants ─────────────────────────────────────────────────────────────────
+const HARI_LIST = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"];
+const DAY_ORDER = Object.fromEntries(HARI_LIST.map((h, i) => [h, i + 1]));
 
-const avatarColors = [
-  "bg-cyan-100 text-cyan-700",
-  "bg-violet-100 text-violet-700",
-  "bg-amber-100 text-amber-700",
-  "bg-rose-100 text-rose-700",
-  "bg-emerald-100 text-emerald-700",
-];
-const getAvatarColor = (name = "") =>
-  avatarColors[name.charCodeAt(0) % avatarColors.length];
+const DAY_COLOR = {
+  Senin:  "bg-cyan-600",
+  Selasa: "bg-violet-600",
+  Rabu:   "bg-emerald-600",
+  Kamis:  "bg-amber-500",
+  Jumat:  "bg-rose-500",
+  Sabtu:  "bg-indigo-500",
+  Minggu: "bg-pink-500",
+};
 
-// ── Skeleton ──────────────────────────────────────────────────────────────────
-function SkeletonCard() {
+const DAY_ABBR = {
+  Senin:"Sen", Selasa:"Sel", Rabu:"Rab",
+  Kamis:"Kam", Jumat:"Jum", Sabtu:"Sab", Minggu:"Min",
+};
+
+const EMPTY_FORM = { hari: "Senin", jam_mulai: "08:00", jam_selesai: "16:00", kuota: 10 };
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+function SkeletonRow() {
   return (
-    <div className="animate-pulse overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
-      <div className="h-1 bg-slate-200" />
-      <div className="space-y-2.5 p-4">
-        <div className="flex items-center gap-2.5">
-          <div className="h-8 w-8 rounded-full bg-slate-200" />
-          <div className="flex-1 space-y-1.5">
-            <div className="h-3 w-24 rounded bg-slate-200" />
-            <div className="h-2.5 w-32 rounded bg-slate-100" />
-          </div>
-          <div className="h-5 w-16 rounded-full bg-slate-200" />
-        </div>
-        <div className="h-7 rounded-lg bg-slate-100" />
-        <div className="h-7 rounded-lg bg-slate-100" />
-        <div className="flex gap-1.5 pt-0.5">
-          <div className="h-7 flex-1 rounded-lg bg-slate-200" />
-          <div className="h-7 flex-1 rounded-lg bg-slate-100" />
-        </div>
+    <div className="animate-pulse flex items-center gap-4 rounded-2xl border border-slate-100 bg-slate-50 px-5 py-4">
+      <div className="h-11 w-11 rounded-xl bg-slate-200" />
+      <div className="flex-1 space-y-2">
+        <div className="h-3.5 w-24 rounded bg-slate-200" />
+        <div className="h-3 w-36 rounded bg-slate-100" />
+      </div>
+      <div className="h-6 w-14 rounded-full bg-slate-200" />
+      <div className="flex gap-2">
+        <div className="h-8 w-8 rounded-lg bg-slate-200" />
+        <div className="h-8 w-8 rounded-lg bg-slate-200" />
       </div>
     </div>
   );
 }
 
-// ── Empty State ───────────────────────────────────────────────────────────────
-function EmptyState({ message }) {
+function EmptyState({ onAdd }) {
   return (
-    <div className="col-span-full flex flex-col items-center gap-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 py-20 text-center">
-      <ClipboardList className="h-12 w-12 text-slate-300" />
-      <p className="text-sm font-medium text-slate-400">{message}</p>
+    <div className="flex flex-col items-center gap-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 py-16 text-center">
+      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-cyan-50 ring-1 ring-cyan-200">
+        <CalendarDays className="h-7 w-7 text-cyan-500" />
+      </div>
+      <div>
+        <p className="text-sm font-semibold text-slate-700">Belum ada jadwal praktik</p>
+        <p className="mt-1 text-xs text-slate-400">Tambahkan jadwal pertama Anda untuk mulai menerima booking.</p>
+      </div>
+      <button
+        onClick={onAdd}
+        className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-cyan-200 transition hover:bg-cyan-700"
+      >
+        <Plus size={15} /> Tambah Jadwal
+      </button>
     </div>
   );
 }
 
-// ── Booking Card ──────────────────────────────────────────────────────────────
-function BookingCard({ b, type, onApprove, onReject }) {
-  const accentTop =
-    type === "pending"
-      ? "bg-amber-400"
-      : type === "approved"
-        ? "bg-emerald-500"
-        : "bg-rose-500";
+// ── Modal ─────────────────────────────────────────────────────────────────────
+function ScheduleModal({ mode, form, onChange, onSubmit, onClose, loading, error }) {
+  const isEdit = mode === "edit";
 
   return (
-    <article className="group flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md">
-      {/* Top accent bar */}
-      <div className={`h-1 w-full ${accentTop}`} />
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+        onClick={onClose}
+      />
 
-      <div className="flex flex-1 flex-col p-4">
-        {/* ── Patient Header ── */}
-        <div className="flex items-center gap-2.5">
-          <div
-            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${getAvatarColor(b.pasien_name)}`}
-          >
-            {getInitials(b.pasien_name)}
-          </div>
-
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-bold text-slate-900">
-              {b.pasien_name}
+      {/* Panel */}
+      <div className="relative w-full max-w-md rounded-2xl bg-white shadow-2xl shadow-slate-300/40 ring-1 ring-slate-200">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+          <div>
+            <h3 className="text-base font-bold text-slate-900">
+              {isEdit ? "Edit Jadwal" : "Tambah Jadwal"}
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {isEdit ? "Ubah detail jadwal praktik Anda." : "Isi detail jadwal praktik baru."}
             </p>
-            <p className="truncate text-[11px] text-slate-400">{b.pasien_email}</p>
           </div>
-
-          {/* Status badge */}
-          {type === "pending" && (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-amber-200">
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
-              Menunggu
-            </span>
-          )}
-          {type === "approved" && (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-              Disetujui
-            </span>
-          )}
-          {type === "rejected" && (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700 ring-1 ring-rose-200">
-              <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
-              Ditolak
-            </span>
-          )}
+          <button
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+          >
+            <X size={16} />
+          </button>
         </div>
 
-        {/* ── Divider ── */}
-        <div className="my-3 border-t border-slate-100" />
-
-        {/* ── Details ── */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-xs">
-            <span className="flex items-center gap-1.5 text-slate-400">
-              <Calendar className="h-3 w-3" />
-              Tanggal
-            </span>
-            <span className="font-semibold text-slate-800">{b.tanggal}</span>
-          </div>
-
-          <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-xs">
-            <span className="flex items-center gap-1.5 text-slate-400">
-              <Clock className="h-3 w-3" />
-              Jadwal
-            </span>
-            <span className="font-semibold text-slate-800">
-              {b.hari} • {b.jam_mulai}–{b.jam_selesai}
-            </span>
-          </div>
-
-          {type === "approved" && (
-            <div className="flex items-center justify-between rounded-lg bg-emerald-50 px-3 py-2 text-xs ring-1 ring-emerald-200">
-              <span className="flex items-center gap-1.5 font-semibold text-emerald-700">
-                <Hash className="h-3 w-3" />
-                Antrian
-              </span>
-              <span className="text-base font-extrabold text-emerald-600">
-                #{b.nomor_antrian}
-              </span>
+        {/* Body */}
+        <div className="space-y-4 p-6">
+          {error && (
+            <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+              <AlertTriangle size={15} className="shrink-0" />
+              {error}
             </div>
           )}
 
-          {b.catatan && (
-            <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs">
-              <span className="flex items-center gap-1.5 text-slate-400">
-                <StickyNote className="h-3 w-3" />
-                Catatan
-              </span>
-              <p className="mt-1 text-slate-700">{b.catatan}</p>
+          {/* Hari */}
+          <div>
+            <label className="mb-1.5 block text-sm font-semibold text-slate-700">Hari</label>
+            <div className="relative">
+              <select
+                name="hari"
+                value={form.hari}
+                onChange={onChange}
+                className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/10"
+              >
+                {HARI_LIST.map((h) => (
+                  <option key={h} value={h}>{h}</option>
+                ))}
+              </select>
+              <ChevronDown size={15} className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
             </div>
-          )}
+          </div>
+
+          {/* Jam */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1.5 block text-sm font-semibold text-slate-700">Jam Mulai</label>
+              <input
+                type="time"
+                name="jam_mulai"
+                value={form.jam_mulai}
+                onChange={onChange}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/10"
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-sm font-semibold text-slate-700">Jam Selesai</label>
+              <input
+                type="time"
+                name="jam_selesai"
+                value={form.jam_selesai}
+                onChange={onChange}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/10"
+              />
+            </div>
+          </div>
+
+          {/* Kuota */}
+          <div>
+            <label className="mb-1.5 block text-sm font-semibold text-slate-700">Kuota Pasien</label>
+            <input
+              type="number"
+              name="kuota"
+              min={1}
+              max={100}
+              value={form.kuota}
+              onChange={onChange}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/10"
+            />
+            <p className="mt-1 text-xs text-slate-400">Maksimal pasien yang dapat booking pada jadwal ini.</p>
+          </div>
         </div>
 
-        {/* ── Actions (pending only) ── */}
-        {type === "pending" && (
-          <div className="mt-3 flex gap-1.5">
-            <button
-              onClick={onApprove}
-              className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-emerald-500 py-2 text-xs font-semibold text-white transition hover:bg-emerald-600 active:scale-95"
-            >
-              <CheckCircle className="h-3.5 w-3.5" />
-              Approve
-            </button>
-            <button
-              onClick={onReject}
-              className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-rose-200 bg-rose-50 py-2 text-xs font-semibold text-rose-600 transition hover:bg-rose-100 active:scale-95"
-            >
-              <XCircle className="h-3.5 w-3.5" />
-              Tolak
-            </button>
-          </div>
-        )}
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-2 border-t border-slate-100 px-6 py-4">
+          <button
+            onClick={onClose}
+            className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+          >
+            Batal
+          </button>
+          <button
+            onClick={onSubmit}
+            disabled={loading}
+            className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-5 py-2 text-sm font-semibold text-white shadow-sm shadow-cyan-200 transition hover:bg-cyan-700 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {loading ? (
+              <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+              </svg>
+            ) : (
+              <Check size={15} />
+            )}
+            {loading ? "Menyimpan..." : isEdit ? "Simpan Perubahan" : "Tambah Jadwal"}
+          </button>
+        </div>
       </div>
-    </article>
+    </div>
   );
 }
 
-// ── Tab Button ────────────────────────────────────────────────────────────────
-function TabButton({ active, onClick, color, label, count }) {
-  const activeStyles = {
-    pending: "bg-amber-500 text-white shadow-sm shadow-amber-200",
-    approved: "bg-emerald-500 text-white shadow-sm shadow-emerald-200",
-    rejected: "bg-rose-500 text-white shadow-sm shadow-rose-200",
-  };
-  const inactiveStyles =
-    "bg-white text-slate-600 border border-slate-200 hover:border-slate-300 hover:bg-slate-50";
-
+// ── Delete Confirm Modal ──────────────────────────────────────────────────────
+function DeleteModal({ schedule, onConfirm, onClose, loading }) {
   return (
-    <button
-      onClick={onClick}
-      className={`inline-flex items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-semibold transition-all duration-200 ${
-        active ? activeStyles[color] : inactiveStyles
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-sm rounded-2xl bg-white shadow-2xl shadow-slate-300/40 ring-1 ring-slate-200 p-6">
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-50 ring-1 ring-red-200 mx-auto mb-4">
+          <Trash2 className="h-6 w-6 text-red-500" />
+        </div>
+        <h3 className="text-center text-base font-bold text-slate-900 mb-1">Hapus Jadwal?</h3>
+        <p className="text-center text-sm text-slate-500 mb-6">
+          Jadwal{" "}
+          <span className="font-semibold text-slate-700">
+            {schedule?.hari}, {schedule?.jam_mulai}–{schedule?.jam_selesai}
+          </span>{" "}
+          akan dihapus permanen dan tidak bisa dikembalikan.
+        </p>
+        <div className="flex gap-2">
+          <button
+            onClick={onClose}
+            className="flex-1 rounded-xl border border-slate-200 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+          >
+            Batal
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={loading}
+            className="flex-1 rounded-xl bg-red-500 py-2.5 text-sm font-semibold text-white transition hover:bg-red-600 disabled:opacity-60"
+          >
+            {loading ? "Menghapus..." : "Ya, Hapus"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function Toast({ message, type }) {
+  if (!message) return null;
+  const isError = type === "error";
+  return (
+    <div className={`fixed bottom-6 right-6 z-60 flex items-center gap-3 rounded-2xl px-5 py-3.5 text-sm font-semibold shadow-xl ring-1 transition-all
+      ${isError
+        ? "bg-red-500 text-white ring-red-400"
+        : "bg-slate-900 text-white ring-slate-700"
       }`}
     >
-      {label}
-      <span
-        className={`rounded-full px-2 py-0.5 text-xs font-bold ${
-          active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
-        }`}
-      >
-        {count}
-      </span>
-    </button>
+      {isError ? <AlertTriangle size={15} /> : <Check size={15} className="text-cyan-400" />}
+      {message}
+    </div>
   );
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
-export default function DoctorDaftarPasien() {
-  const [bookings, setBookings] = useState([]);
-  const [antrian, setAntrian]   = useState([]);
-  const [loading, setLoading]   = useState(true);
-  const [activeTab, setActiveTab] = useState("pending");
+export default function ScheduleManager() {
+  const [schedules, setSchedules] = useState([]);
+  const [loading, setLoading]     = useState(true);
 
-  /* ── Load ── */
-  const load = () =>
-    Promise.all([
-      api.get("/bookings/doctor"),
-      api.get("/bookings/antrian"),
-    ])
-      .then(([r1, r2]) => {
-        setBookings(r1.data.bookings || []);
-        setAntrian(r2.data.antrian   || []);
-      })
-      .catch(() => { setBookings([]); setAntrian([]); })
-      .finally(() => setLoading(false));
+  const [modalMode, setModalMode]     = useState(null); // "add" | "edit" | null
+  const [editTarget, setEditTarget]   = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
-  useEffect(() => {
-    load();
-  }, []);
+  const [form, setForm]         = useState(EMPTY_FORM);
+  const [formErr, setFormErr]   = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [deleting, setDeleting]     = useState(false);
 
-  /* ── Update status ── */
-  const updateStatus = async (id, status) => {
-    await api.put(`/bookings/${id}/status`, { status });
-    load();
+  const [toast, setToast] = useState({ message: "", type: "success" });
+
+  // ── Fetch ──
+  const fetchSchedules = async () => {
+    try {
+      const { data } = await api.get("/schedules/my");
+      const sorted = [...(data.schedules || [])].sort((a, b) => {
+        const d = (DAY_ORDER[a.hari] || 9) - (DAY_ORDER[b.hari] || 9);
+        return d !== 0 ? d : (a.jam_mulai || "").localeCompare(b.jam_mulai || "");
+      });
+      setSchedules(sorted);
+    } catch {
+      setSchedules([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  /* ── Filtered lists ── */
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  useEffect(() => { fetchSchedules(); }, []);
 
-  const pendingBookings = useMemo(
-    () => bookings.filter((b) => b.status === "pending"),
-    [bookings],
-  );
-  const approvedBookings = useMemo(
-    () =>
-      bookings
-        .filter((b) => b.status === "approved")
-        .sort((a, b) => {
-          const da = Math.abs(new Date(a.tanggal) - today);
-          const db = Math.abs(new Date(b.tanggal) - today);
-          return da - db;
-        }),
-    [bookings],
-  );
-  const rejectedBookings = useMemo(
-    () => bookings.filter((b) => b.status === "rejected"),
-    [bookings],
-  );
+  // ── Toast helper ──
+  const showToast = (message, type = "success") => {
+    setToast({ message, type });
+    setTimeout(() => setToast({ message: "", type: "success" }), 3000);
+  };
 
-  const currentData =
-    activeTab === "pending"
-      ? pendingBookings
-      : activeTab === "approved"
-        ? approvedBookings
-        : rejectedBookings;
+  // ── Handlers ──
+  const openAdd = () => {
+    setForm(EMPTY_FORM);
+    setFormErr("");
+    setModalMode("add");
+  };
 
-  /* ── Stat cards ── */
-  const statCards = [
-    {
-      label: "Booking Masuk",
-      value: pendingBookings.length,
-      icon: ClipboardList,
-      color: "text-amber-600",
-      bg: "bg-amber-50",
-      ring: "ring-amber-200",
-      tab: "pending",
-    },
-    {
-      label: "Daftar Antrian",
-      value: approvedBookings.length,
-      icon: Users,
-      color: "text-emerald-600",
-      bg: "bg-emerald-50",
-      ring: "ring-emerald-200",
-      tab: "approved",
-    },
-    {
-      label: "Ditolak",
-      value: rejectedBookings.length,
-      icon: XCircle,
-      color: "text-rose-600",
-      bg: "bg-rose-50",
-      ring: "ring-rose-200",
-      tab: "rejected",
-    },
-  ];
+  const openEdit = (s) => {
+    setEditTarget(s);
+    setForm({ hari: s.hari, jam_mulai: s.jam_mulai, jam_selesai: s.jam_selesai, kuota: s.kuota });
+    setFormErr("");
+    setModalMode("edit");
+  };
 
+  const closeModal = () => { setModalMode(null); setEditTarget(null); };
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setForm((f) => ({ ...f, [name]: name === "kuota" ? Number(value) : value }));
+  };
+
+  const handleSubmit = async () => {
+    if (!form.hari || !form.jam_mulai || !form.jam_selesai) {
+      setFormErr("Hari, jam mulai, dan jam selesai wajib diisi.");
+      return;
+    }
+    if (form.jam_selesai <= form.jam_mulai) {
+      setFormErr("Jam selesai harus lebih besar dari jam mulai.");
+      return;
+    }
+    setFormErr("");
+    setSubmitting(true);
+    try {
+      if (modalMode === "add") {
+        await api.post("/schedules", form);
+        showToast("Jadwal berhasil ditambahkan.");
+      } else {
+        await api.put(`/schedules/${editTarget.id}`, form);
+        showToast("Jadwal berhasil diperbarui.");
+      }
+      closeModal();
+      fetchSchedules();
+    } catch (err) {
+      setFormErr(err.response?.data?.message || "Terjadi kesalahan. Coba lagi.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      await api.delete(`/schedules/${deleteTarget.id}`);
+      showToast("Jadwal berhasil dihapus.");
+      setDeleteTarget(null);
+      fetchSchedules();
+    } catch (err) {
+      showToast(err.response?.data?.message || "Gagal menghapus jadwal.", "error");
+      setDeleteTarget(null);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  // ── Render ──
   return (
-    <div className="space-y-5">
-      {/* ── Hero ─────────────────────────────────────────────────────────── */}
-      <section className="relative overflow-hidden rounded-2xl bg-linear-to-br from-slate-900 via-slate-800 to-cyan-900 px-7 py-8 text-white shadow-xl">
-        <div className="pointer-events-none absolute -right-12 -top-12 h-56 w-56 rounded-full bg-cyan-500/10 blur-2xl" />
-        <div className="pointer-events-none absolute -bottom-8 right-24 h-36 w-36 rounded-full bg-cyan-400/10 blur-xl" />
+    <>
+      <div className="space-y-6">
 
-        <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <span className="inline-flex rounded-full bg-white/10 px-3 py-1 text-[11px] font-bold uppercase tracking-widest text-cyan-200 ring-1 ring-white/15">
-              Daftar Pasien
-            </span>
-            <h2 className="mt-3 text-2xl font-extrabold tracking-tight sm:text-3xl">
-              Kelola Booking Pasien
-            </h2>
-            <p className="mt-1.5 max-w-lg text-sm leading-relaxed text-slate-300">
-              Approve booking, pantau antrian aktif, dan lihat riwayat booking
-              yang ditolak.
-            </p>
-          </div>
+        {/* ── Header ── */}
+        <section className="relative overflow-hidden rounded-2xl bg-linear-to-br from-slate-900 via-slate-800 to-cyan-900 px-7 py-8 text-white shadow-xl">
+          <div className="pointer-events-none absolute -right-12 -top-12 h-56 w-56 rounded-full bg-cyan-500/10 blur-2xl" />
+          <div className="pointer-events-none absolute -bottom-8 right-24 h-36 w-36 rounded-full bg-cyan-400/10 blur-xl" />
 
-          {/* Antrian active mini-stat */}
-          <div className="flex gap-3 sm:flex-col sm:items-end sm:gap-2">
-            <div className="rounded-xl bg-white/10 px-4 py-2.5 text-center ring-1 ring-white/10">
-              <p className="text-[11px] text-slate-400">Daftar antrian</p>
-              <p className="text-2xl font-bold text-white">
-                {loading ? (
-                  <span className="opacity-40">—</span>
-                ) : (
-                  approvedBookings.length
-                )}
+          <div className="relative flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <span className="inline-flex rounded-full bg-white/10 px-3 py-1 text-[11px] font-bold uppercase tracking-widest text-cyan-200 ring-1 ring-white/15">
+                Jadwal Praktik
+              </span>
+              <h2 className="mt-3 text-2xl font-extrabold tracking-tight sm:text-3xl">
+                Kelola Jadwal Saya
+              </h2>
+              <p className="mt-1.5 max-w-lg text-sm leading-relaxed text-slate-300">
+                Atur hari, jam, dan kuota pasien untuk setiap jadwal praktik Anda.
               </p>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* ── Stat Cards ───────────────────────────────────────────────────── */}
-      <section className="grid gap-3 sm:grid-cols-3">
-        {statCards.map((c) => {
-          const Icon = c.icon;
-          return (
-            <button
-              key={c.label}
-              onClick={() => setActiveTab(c.tab)}
-              className="flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-cyan-200 hover:shadow-md"
-            >
-              <div className={`rounded-xl ${c.bg} p-3 ring-1 ${c.ring}`}>
-                <Icon className={`h-5 w-5 ${c.color}`} />
+        {/* ── Stats bar ── */}
+        {!loading && schedules.length > 0 && (
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { label: "Total Jadwal",   value: schedules.length,                                    color: "text-cyan-600",    bg: "bg-cyan-50",    ring: "ring-cyan-200"    },
+              { label: "Total Kuota",    value: schedules.reduce((a, s) => a + (s.kuota || 0), 0),  color: "text-violet-600",  bg: "bg-violet-50",  ring: "ring-violet-200"  },
+              { label: "Hari Aktif",     value: new Set(schedules.map((s) => s.hari)).size,          color: "text-emerald-600", bg: "bg-emerald-50", ring: "ring-emerald-200" },
+            ].map((s) => (
+              <div key={s.label} className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+                <p className={`text-2xl font-extrabold ${s.color}`}>{s.value}</p>
+                <p className="mt-0.5 text-xs font-medium text-slate-500">{s.label}</p>
               </div>
-              <div className="text-left">
-                <p className="text-xs font-medium text-slate-400">{c.label}</p>
-                <p className="mt-0.5 text-2xl font-bold text-slate-900">
-                  {loading ? (
-                    <span className="text-slate-300">—</span>
-                  ) : (
-                    c.value
-                  )}
-                </p>
-              </div>
-              <ChevronRight className="ml-auto h-4 w-4 text-slate-300" />
-            </button>
-          );
-        })}
-      </section>
+            ))}
+          </div>
+        )}
 
-      {/* ── Tab Panel ─────────────────────────────────────────────────────── */}
-      <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-        {/* Tab header */}
-        <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-5 py-4">
-          <TabButton
-            active={activeTab === "pending"}
-            onClick={() => setActiveTab("pending")}
-            color="pending"
-            label="Booking Masuk"
-            count={pendingBookings.length}
-          />
-          <TabButton
-            active={activeTab === "approved"}
-            onClick={() => setActiveTab("approved")}
-            color="approved"
-            label="Daftar Antrian"
-            count={approvedBookings.length}
-          />
-          <TabButton
-            active={activeTab === "rejected"}
-            onClick={() => setActiveTab("rejected")}
-            color="rejected"
-            label="Ditolak"
-            count={rejectedBookings.length}
-          />
-        </div>
+        {/* ── Schedule List ── */}
+        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+            <div>
+              <h3 className="text-base font-bold text-slate-900">Daftar Jadwal</h3>
+              <p className="text-xs text-slate-400">
+                {loading ? "Memuat..." : `${schedules.length} jadwal terdaftar`}
+              </p>
+            </div>
+            {!loading && schedules.length > 0 && (
+              <button
+                onClick={openAdd}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-cyan-50 px-3.5 py-2 text-xs font-semibold text-cyan-700 ring-1 ring-cyan-200 transition hover:bg-cyan-100"
+              >
+                <Plus size={13} /> Tambah
+              </button>
+            )}
+          </div>
 
-        {/* Tab content */}
-        <div className="p-5">
-          {loading ? (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <SkeletonCard key={i} />
-              ))}
-            </div>
-          ) : currentData.length === 0 ? (
-            <div className="grid">
-              <EmptyState
-                message={
-                  activeTab === "pending"
-                    ? "Belum ada booking masuk."
-                    : activeTab === "approved"
-                      ? "Belum ada antrian aktif."
-                      : "Belum ada booking yang ditolak."
-                }
-              />
-            </div>
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {currentData.map((b) => (
-                <BookingCard
-                  key={b.id}
-                  b={b}
-                  type={activeTab}
-                  onApprove={() => updateStatus(b.id, "approved")}
-                  onReject={() => updateStatus(b.id, "rejected")}
-                />
-              ))}
-            </div>
-          )}
+          <div className="p-4 space-y-2">
+            {loading ? (
+              Array.from({ length: 4 }).map((_, i) => <SkeletonRow key={i} />)
+            ) : schedules.length === 0 ? (
+              <EmptyState onAdd={openAdd} />
+            ) : (
+              schedules.map((s) => (
+                <div
+                  key={s.id}
+                  className="group flex items-center gap-4 rounded-2xl border border-slate-100 bg-slate-50/60 px-5 py-4 transition hover:border-cyan-200 hover:bg-cyan-50/30"
+                >
+                  {/* Day badge */}
+                  <div className={`flex h-11 w-11 shrink-0 flex-col items-center justify-center rounded-xl text-white shadow-sm ${DAY_COLOR[s.hari] ?? "bg-slate-600"}`}>
+                    <span className="text-[10px] font-bold uppercase tracking-wide leading-none">
+                      {DAY_ABBR[s.hari] ?? s.hari?.slice(0, 3)}
+                    </span>
+                  </div>
+
+                  {/* Info */}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-bold text-slate-800">{s.hari}</p>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
+                      <span className="inline-flex items-center gap-1">
+                        <Clock size={11} className="text-slate-400" />
+                        {s.jam_mulai} – {s.jam_selesai}
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <Hash size={11} className="text-slate-400" />
+                        {s.kuota} kuota
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Active badge */}
+                  <span className={`hidden shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 sm:inline-flex
+                    ${s.is_active
+                      ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+                      : "bg-slate-100 text-slate-500 ring-slate-200"
+                    }`}
+                  >
+                    <span className={`h-1.5 w-1.5 rounded-full ${s.is_active ? "bg-emerald-500" : "bg-slate-400"}`} />
+                    {s.is_active ? "Aktif" : "Nonaktif"}
+                  </span>
+
+                  {/* Actions */}
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <button
+                      onClick={() => openEdit(s)}
+                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 transition hover:border-cyan-300 hover:bg-cyan-50 hover:text-cyan-600"
+                      title="Edit jadwal"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    <button
+                      onClick={() => setDeleteTarget(s)}
+                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 transition hover:border-red-200 hover:bg-red-50 hover:text-red-500"
+                      title="Hapus jadwal"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
-      </section>
-    </div>
+      </div>
+
+      {/* ── Modals ── */}
+      {modalMode && (
+        <ScheduleModal
+          mode={modalMode}
+          form={form}
+          onChange={handleChange}
+          onSubmit={handleSubmit}
+          onClose={closeModal}
+          loading={submitting}
+          error={formErr}
+        />
+      )}
+
+      {deleteTarget && (
+        <DeleteModal
+          schedule={deleteTarget}
+          onConfirm={handleDelete}
+          onClose={() => setDeleteTarget(null)}
+          loading={deleting}
+        />
+      )}
+
+      {/* ── Toast ── */}
+      <Toast message={toast.message} type={toast.type} />
+    </>
   );
 }
